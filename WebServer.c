@@ -138,15 +138,27 @@ int main() {
             continue;
         }
 
-        printf("Client connected: %s\n", inet_ntoa(client_address.sin_addr));
+        // inet_ntop() 是一个用于将二进制格式的 IP 地址转换为人类可读的字符串格式的函数。
+        // 它是 inet_ntoa() 的替代品，支持 IPv4 和 IPv6 地址，并且是线程安全的。
+        char client_ip[INET_ADDRSTRLEN]; // 存储点分十进制字符串
+        inet_ntop(AF_INET, &client_address.sin_addr, client_ip, INET_ADDRSTRLEN);
+        printf("Client connected: %s\n", client_ip);
 
         // 创建一个新线程处理客户端请求
+        // 定义一个 pthread_t 类型的变量 thread_id，用于存储新线程的 ID。
         pthread_t thread_id;
+        // 创建一个新线程，执行 handle_client 函数，传递 client_socket 作为参数。
+        // &thread_id：存储新线程的 ID。
+        // NULL：使用默认线程属性。
+        // handle_client：线程函数，用于处理客户端请求。
+        // client_socket：传递给线程函数的参数，表示客户端套接字。
         if (pthread_create(&thread_id, NULL, handle_client, client_socket) != 0) {
             perror("Failed to create thread");
             close(*client_socket);
             free(client_socket);
         } else {
+            // 分离后的线程在结束时会自动释放资源，无需调用 pthread_join()。
+            // 适用于不需要获取线程返回值的场景。
             pthread_detach(thread_id); // 分离线程，使其独立运行
         }
     }
