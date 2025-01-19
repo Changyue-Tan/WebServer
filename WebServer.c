@@ -10,8 +10,8 @@
 #define BUFFER_SIZE 4096
 
 int server_socket; // 全局变量，用于存储服务器套接字
-int request_count = 0; // 全局变量，用于记录请求编号
-pthread_mutex_t request_count_mutex = PTHREAD_MUTEX_INITIALIZER; // 互斥锁，用于保护 request_count
+int response_count = 0; // 全局变量，用于记录请求编号
+pthread_mutex_t response_count_mutex = PTHREAD_MUTEX_INITIALIZER; // 互斥锁，用于保护 response_count
 
 // 信号处理函数
 void handle_signal(int signal) {
@@ -24,6 +24,53 @@ void handle_signal(int signal) {
     close(server_socket);
     printf("Server stopped.\n");
     exit(0);
+}
+
+// 发送 HTTP 响应
+void send_http_response(int client_socket, const char *path, int current_response_number) {
+    char response[BUFFER_SIZE];
+    const char *content_type = "text/html";
+    const char *status_line = "HTTP/1.1 200 OK\r\n";
+    const char *body = "";
+
+    // 根据请求路径设置响应内容
+    if (strcmp(path, "/") == 0) {
+        // 网页请求
+        body = "<html><body><h1>Hello, World!</h1><p>This is request #%d</p></body></html>";
+    } else if (strcmp(path, "/favicon.ico") == 0) {
+        // favicon.ico 请求（返回空内容）
+        body = "";
+        content_type = "image/x-icon";
+    } else {
+        // 未知路径（返回 404 错误）
+        status_line = "HTTP/1.1 404 Not Found\r\n";
+        body = "<html><body><h1>404 Not Found</h1></body></html>";
+    }
+
+    // snprintf 是 C 标准库中的一个函数，用于将格式化的数据写入字符串缓冲区
+    // 阻止缓冲区溢出，确保 response 的大小不超过 BUFFER_SIZE
+    // 线程安全
+
+    // 生成 HTTP 响应头
+    snprintf(response, sizeof(response),
+            "%s"
+            "Content-Type: %s\r\n"
+            "\r\n", // 空行分隔头部和正文
+            status_line, content_type);
+
+    // 生成 HTTP 正文
+    if (strlen(body) > 0) {
+        char body_buffer[BUFFER_SIZE];
+        // 使用 snprintf 将 current_response_number 格式化到 body 中。
+        snprintf(body_buffer, sizeof(body_buffer), body, current_response_number);
+        // 使用 strncat 将格式化后的 body 追加到 response 中。
+        strncat(response, body_buffer, sizeof(response) - strlen(response) - 1);
+    }
+
+    // 发送响应
+    send(client_socket, response, strlen(response), 0);
+    printf("Sent response:\n<<<<<<<<<<<<<<<<<<<<\n%s\n>>>>>>>>>>>>>>>>>>>>\n", response);
+    close(client_socket);
 }
 
 // 处理客户端请求
@@ -45,29 +92,29 @@ void *handle_client(void *arg) {
 
     // 打印客户端请求
     receive_buffer[bytes_received] = '\0';
-    printf("Received request:\n%s\n", receive_buffer);
+    printf("Received request:\n<<<<<<<<<<<<<<<<<<<<\n%s\n>>>>>>>>>>>>>>>>>>>>\n", receive_buffer);
 
-    // 获取请求编号
-    pthread_mutex_lock(&request_count_mutex);
-    int current_request_number = ++request_count;
-    pthread_mutex_unlock(&request_count_mutex);
+    // 提取请求路径
+    char *path = strtok(receive_buffer, " "); // 获取请求方法（如 GET）
+    if (path != NULL) {
+        path = strtok(NULL, " "); // 获取请求路径（如 / 或 /favicon.ico）
+    }
 
-    // 简单的 HTTP 响应，包含请求编号
-    char response[BUFFER_SIZE];
-    // snprintf 是 C 标准库中的一个函数，用于将格式化的数据写入字符串缓冲区
-    // 阻止缓冲区溢出，确保 response 的大小不超过 BUFFER_SIZE
-    // 线程安全
-    snprintf(response, sizeof(response),
-             "HTTP/1.1 200 OK\r\n"
-             "Content-Type: text/html\r\n"
-             "\r\n"
-             "<html><body><h1>Hello, World!</h1><p>This is request #%d</p></body></html>",
-             current_request_number);
+    // 如果没有路径，默认返回根路径
+    if (path == NULL) {
+        path = "/";
+    }
 
-    send(client_socket, response, strlen(response), 0);
-    close(client_socket);
+    // 获取响应编号
+    pthread_mutex_lock(&response_count_mutex);
+    int current_response_number = ++response_count;
+    pthread_mutex_unlock(&response_count_mutex);
 
-    return NULL;
+    
+    // 发送 HTTP 响应
+    send_http_response(client_socket, path, current_response_number);
+
+    return NULL; // 确保所有路径都有返回值
 }
 
 int main() {
